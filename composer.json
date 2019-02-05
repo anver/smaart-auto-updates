@@ -1,0 +1,23 @@
+{
+    "name": "anver/smaart-auto-updates",
+    "description": "Provides automatic updates feature for custom plugins not hosted on wordpress.org",
+    "keywords": ["automatic updates", "wordpress automatic update", "wordpress licensing", "wordpress plugin upgrades"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Anver Sadutt",
+            "email": "anvergdr@gmail.com"
+        }
+    ],
+    "type": "project",
+    "require": {
+        "php": ">=5.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "SmaartWeb\\AutoUpdates\\": "src/"
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
