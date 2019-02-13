@@ -2,38 +2,47 @@
 
 namespace SmaartWeb\AutoUpdates;
 
+use WP_Error;
+
 class AutoUpdates {
 
     /**
      * Set the api url
-     * @access public
+     * @access protected
      */
-    private $url;
+    protected $url;
 
     /**
      * License key
-     * @access private
+     * @access protected
      */
-    private $license_key;
+    protected $license_key;
 
     /**
      * Product id
-     * @access private
+     * @access protected
      */
-    private $product_id;
+    protected $product_id;
 
     /**
      * The plugin path
-     * @access public
+     * @access protected
      */
-    private $plugin_path;
+    protected $plugin_path;
 
     /**
      * The main plugin filename without the .php extenstion
      * eg: akismet
-     * @access private
+     * @access protected
      */
-    private $plugin_slug;
+    protected $plugin_slug;
+
+    /**
+     * The locator object
+     * @access private
+     * @var Locator The locator object
+     */
+    private $locator;
 
     /**
      * Set product id
@@ -75,17 +84,8 @@ class AutoUpdates {
      */
     public function set_path( $path ) {
         $this->plugin_path = $path;
+        $this->plugin_slug = basename( $path, ".php" );
         return $this;
-    }
-
-    /**
-     * Sets the plugin slug
-     * The name of the main plugin file without the .php extension
-     * For instance "akismet" for the akismet.php plugin
-     * @access private
-     */
-    private function set_slug() {
-        $this->plugin_slug = basename( $this->plugin_path, '.php' );
     }
 
     /**
@@ -93,53 +93,39 @@ class AutoUpdates {
      * @access public
      */
     public function init() {
-        $this->set_slug();
+        ( new PluginsRow() )->set_path( $this->plugin_path )
+                ->set_url( $this->url )
+                ->set_license( $this->license_key )
+                ->set_product( $this->product_id )
+                ->init();
+        $this->locator = new Locator();
         add_filter( 'pre_set_site_transient_update_plugins', [$this, 'check_updates'] );
-        add_filter( 'plugins_api', [$this, 'call_api'], 10, 3 );
-        add_action( 'after_plugin_row_' . $this->plugin_path, [$this, 'show_notice'] );
+        add_filter( 'plugins_api', [$this, 'get_plugin_information'], 10, 3 );
     }
 
     /**
-     * Check for latest updates
-     * before wordpress updates the site transient this is called prior to that
-     * we use this hook to pre populate the custom plugins information into the
-     * transient
+     * This stores all the new version plugin information into a site transient
+     * variable which will be used to download the updates
      * @access public
      * @return mixed Returns the modified transient variable which will be stored by WordPress
      */
     public function check_updates( $transient ) {
+
         if ( empty( $transient->checked ) ) {
             return $transient;
         }
 
-        $args = [
-            'slug' => $this->plugin_slug,
-            'version' => $transient->checked[$this->plugin_path],
-            'product' => $this->product_id,
-            'domain' => home_url()
-        ];
+        $plugin_file = $this->locator->get_plugins_absolute_path( $this->plugin_path );
+        $plugin_data = get_plugin_data( $plugin_file );
+        $raw_response = $this->get_response( 'plugin_information', ['version' => $plugin_data['Version']] );
 
-        if ( $this->license_key ) {
-            $args['license'] = $this->license_key;
-        }
-
-        $request_string = $this->prepare_request( 'check_update', $args );
-        $raw_response = wp_remote_post( $this->url, $request_string );
-        $response = null;
-
-        if ( !is_wp_error( $raw_response ) && ($raw_response['response']['code'] == 200) ) {
+        if ( !is_wp_error( $raw_response ) && $raw_response['response']['code'] == 200 ) {
             $response = unserialize( $raw_response['body'] );
         }
 
-        if ( is_object( $response ) && !empty( $response ) ) {
-            $transient->response[$this->plugin_path] = $response;
-            return $transient;
-        }
-
-        // Check to make sure there is not a similarly named plugin in the wordpress.org repository
-        if ( isset( $transient->response[$this->plugin_path] ) ) {
-            if ( strpos( $transient->response[$this->plugin_path]->package, 'wordpress.org' ) !== false ) {
-                unset( $transient->response[$this->plugin_path] );
+        if ( is_object( $response[$this->plugin_path] ) && isset( $response[$this->plugin_path] ) && !empty( $response[$this->plugin_path] ) ) {
+            if ( version_compare( $response[$this->plugin_path]->version, $plugin_data['Version'], ">" ) ) {
+                $transient->response[$this->plugin_path] = $response[$this->plugin_path];
             }
         }
 
@@ -147,86 +133,69 @@ class AutoUpdates {
     }
 
     /**
-     * This hook is called whenever the plugin update link is clicked by the
-     * user or individual updates takes place
-     * @param bool|object|array $resObj The result object or array default FALSE
+     * Get the plugin information from the remote api 
+     * @param bool|object|array $result The result object or array default FALSE
+     * If FALSE is returned as result then WordPress takes over
+     * @param string $action The action passed by WordPress
+     * @param mixed $name Description
      * @access public
      */
-    public function call_api( $resObj, $action, $args ) {
-        if ( !isset( $args->slug ) || $args->slug != $this->plugin_slug ) {
-            return $resObj;
+    public function get_plugin_information( $result, $action, $args ) {
+
+        if ( $action != 'plugin_information' || !isset( $args->slug ) || $args->slug != $this->plugin_slug ) {
+            return $result;
         }
 
-        $plugin_info = get_site_transient( 'update_plugins' );
-        $request_args = [
-            'slug' => $this->plugin_slug,
-            'version' => isset( $plugin_info->checked ) ? $plugin_info->checked[$this->plugin_path] : '1.0',
-            'product' => $this->product_id,
-            'domain' => home_url()
-        ];
-
-        if ( $this->license_key ) {
-            $request_args['license'] = $this->license_key;
-        }
-
-        $request_string = $this->prepare_request( $action, $request_args );
-        $raw_response = wp_remote_post( $this->url, $request_string );
+        $plugin_file = $this->locator->get_plugins_absolute_path( $this->plugin_path );
+        $plugin_data = get_plugin_data( $plugin_file );
+        $raw_response = $this->get_response( 'plugin_information', ['version' => $plugin_data['Version']] );
 
         if ( is_wp_error( $raw_response ) ) {
             $response = new WP_Error( 'plugins_api_failed', __( 'An Unexpected HTTP Error occurred during the API request.</p> <p><a href="?" onclick="document.location.reload(); return false;">Try again</a>' ), $raw_response->get_error_message() );
         } else {
             $response = unserialize( $raw_response['body'] );
+
             if ( $response === FALSE ) {
                 $response = new WP_Error( 'plugins_api_failed', __( 'An unknown error occurred' ), $raw_response['body'] );
             }
+        }
+
+        if ( is_object( $response[$this->plugin_path] ) && isset( $response[$this->plugin_path] ) && !empty( $response[$this->plugin_path] ) ) {
+            return $response[$this->plugin_path];
         }
 
         return $response;
     }
 
     /**
-     * Print notice error message below the plugin row
+     * Sends the request to the remote server and receives a response
      * @access public
      */
-    public function show_notice() {
-        $license = $this->wpls_authorize_action();
-
-        if ( $license->info->status === 'Active' ) {
-            return;
-        }
-
-        $messages = [
-            'no_license_yet' => __( 'License is not set yet. Please enter your license key to enable automatic updates.', 'wpls' ),
-            'Expired' => __( 'Your access to updates has expired. You can continue using the plugin, but you\'ll need to renew your license to receive updates and bug fixes.', 'wpls' ),
-            'Invalid' => __( 'The current license key or site token is invalid. Please enter your license key to enable automatic updates.', 'wpls' ),
-            'Deactive' => __( 'The current license is inactive.', 'wpls' ),
-            'Suspended' => __( 'The current license is suspended.', 'wpls' ),
-            'Pending' => __( 'The current license is pending activation.', 'wpls' ),
-            'Wrong_site' => __( 'Please re-enter your license key. This is necessary because the site URL has changed.', 'wpls' ),
+    public function get_response( $action, $args ) {
+        $defaults = [
+            'slug' => $this->plugin_slug,
+            'version' => '1.0',
+            'path' => $this->plugin_path,
+            'product' => $this->product_id,
+            'domain' => home_url(),
+            'action' => $action,
+            'license_key' => $this->license_key
         ];
 
-        if ( $this->license_key ) {
-            $status = $license->info->status;
-        } else {
-            $status = 'no_license_yet';
-        }
-
-        $notice = isset( $messages[$status] ) ? $messages[$status] : __( 'The current license is invalid.', 'wpls' );
-        $licenseLink = $this->makeLicenseLink( apply_filters( 'wpls_plugin_row_link_text-' . $this->plugin_slug, __( 'Enter License Key', 'wpls' ) ) );
-        $showLicenseLink = $status !== 'expired';
+        $request_args = wp_parse_args( $args, $defaults );
+        $request_string = $this->prepare_request( $request_args );
+        return wp_remote_post( $this->url, $request_string );
     }
 
     /**
      * prepares the request
      * @access public
+     * @param mixed $args The arguments
      */
-    public function prepare_request( $action, $args ) {
+    public function prepare_request( $args ) {
         global $wp_version;
-        $request = [
-            'body' => ['action' => $action, 'request' => serialize( $args )],
-            'user-agent' => 'WordPress/' . $wp_version . '; ' . home_url()
-        ];
-        return $request;
+        $req = ['body' => $args, 'user-agent' => 'WordPress/' . $wp_version . '; ' . home_url(), 'timeout' => 600];
+        return $req;
     }
 
 }
