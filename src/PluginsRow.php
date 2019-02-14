@@ -20,7 +20,7 @@ class PluginsRow extends AutoUpdates {
      */
     public function render_view_details_link( $plugin_meta, $plugin_file, $plugin_data = [] ) {
 
-        if ( $this->plugin_path != $plugin_file || isset( $plugin_data['slug'] ) ) {
+        if ( $this->plugin_path != $plugin_file ) {
             return $plugin_meta;
         }
 
@@ -36,8 +36,9 @@ class PluginsRow extends AutoUpdates {
             }
         }
 
+
         $viewDetailsLink = sprintf( '<a href="%s" class="thickbox open-plugin-details-modal" aria-label="%s" data-title="%s">%s</a>'
-                , esc_url( network_admin_url( 'plugin-install.php?tab=plugin-information&plugin=' . urlencode( $this->plugin_slug ) . '&TB_iframe=true&width=600&height=550' ) )
+                , esc_url( network_admin_url( 'plugin-install.php?tab=plugin-information&plugin=' . urlencode( basename( $plugin_file, ".php" ) ) . '&TB_iframe=true&width=600&height=550' ) )
                 , esc_attr( sprintf( __( 'More information about %s' ), $plugin_data['Name'] ) ), esc_attr( $plugin_data['Name'] ), __( 'View details' ) );
         $plugin_meta[$link_index_visit_plugin_site] = $viewDetailsLink;
         return $plugin_meta;
@@ -67,24 +68,66 @@ class PluginsRow extends AutoUpdates {
      * @access public
      */
     public function show_notice() {
+        $message = $this->get_license_status();
+
+        if ( !$message || $message == 'active' ) {
+            return;
+        }
+
         $messages = [
-            'none' => 'License is not set yet. Please enter your license key to enable automatic updates.',
+            'none' => 'License data not found or is invalid',
             'expired' => 'Your access to updates has expired. You can continue using the plugin, but you\'ll need to renew your license to receive updates and bug fixes.',
-            'invalid' => 'The current license key or site token is invalid. Please enter your license key to enable automatic updates.',
-            'deactive' => 'The current license is inactive.',
-            'suspended' => 'The current license is suspended.',
-            'pending' => 'The current license is pending activation.',
-            'wrong_site' => 'Please re-enter your license key. This is necessary because the site URL has changed.'
+            'limitempty' => 'The limits for the license is limited or completely being used',
+            'blocked' => 'The current license is blocked.',
+            'suspended' => 'The current domain is blocked.',
+            'pending' => 'The current license is not activated for this domain yet.'
         ];
         ?>
-        <tr class="plugin-update-tr-active">
+        <tr class="plugin-update-tr-active" style="background-color: burlywood;">
             <td class="plugin-update colspanchange" colspan="3">
                 <div class="expired">
-                    <?php echo $messages['expired']; ?>
+                    <?php echo $messages[$message]; ?>
                 </div>
             </td>
         </tr>
         <?php
+    }
+
+    /**
+     * Get license info
+     * @access public
+     */
+    public function get_license_status() {
+        $this->locator = new Locator();
+        $plugin_file = $this->locator->get_plugins_absolute_path( $this->plugin_path );
+        $plugin_data = get_plugin_data( $plugin_file );
+        $response = $this->get_response( 'get_license_status', ['version' => $plugin_data['Version']] );
+        $body = wp_remote_retrieve_body( $response );
+        if ( is_object( $result = json_decode( $body ) ) ) {
+            return $result->data->status;
+        }
+        return FALSE;
+    }
+
+    /**
+     * Sends the request to the remote server and receives a response
+     * @access public
+     */
+    public function get_response( $action, $args ) {
+        global $wp_version;
+        $defaults = [
+            'slug' => $this->plugin_slug,
+            'version' => '1.0',
+            'path' => $this->plugin_path,
+            'product' => $this->product_id,
+            'domain' => home_url(),
+            'action' => $action,
+            'license_key' => $this->license_key ? $this->license_key : 'dummy'
+        ];
+
+        $request_args = wp_parse_args( $args, $defaults );
+        $request_string = ['body' => $request_args, 'user-agent' => 'WordPress/' . $wp_version . '; ' . home_url(), 'timeout' => 600];
+        return wp_remote_post( $this->url, $request_string );
     }
 
 }

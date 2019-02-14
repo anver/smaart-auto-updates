@@ -172,6 +172,7 @@ class AutoUpdates {
      * @access public
      */
     public function get_response( $action, $args ) {
+        global $wp_version;
         $defaults = [
             'slug' => $this->plugin_slug,
             'version' => '1.0',
@@ -179,23 +180,12 @@ class AutoUpdates {
             'product' => $this->product_id,
             'domain' => home_url(),
             'action' => $action,
-            'license_key' => $this->license_key
+            'license_key' => $this->license_key ? $this->license_key : 'dummy'
         ];
 
         $request_args = wp_parse_args( $args, $defaults );
-        $request_string = $this->prepare_request( $request_args );
+        $request_string = ['body' => $request_args, 'user-agent' => 'WordPress/' . $wp_version . '; ' . home_url(), 'timeout' => 600];
         return wp_remote_post( $this->url, $request_string );
-    }
-
-    /**
-     * prepares the request
-     * @access public
-     * @param mixed $args The arguments
-     */
-    public function prepare_request( $args ) {
-        global $wp_version;
-        $req = ['body' => $args, 'user-agent' => 'WordPress/' . $wp_version . '; ' . home_url(), 'timeout' => 600];
-        return $req;
     }
 
 }
