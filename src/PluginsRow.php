@@ -36,7 +36,6 @@ class PluginsRow extends AutoUpdates {
             }
         }
 
-
         $viewDetailsLink = sprintf( '<a href="%s" class="thickbox open-plugin-details-modal" aria-label="%s" data-title="%s">%s</a>'
                 , esc_url( network_admin_url( 'plugin-install.php?tab=plugin-information&plugin=' . urlencode( basename( $plugin_file, ".php" ) ) . '&TB_iframe=true&width=600&height=550' ) )
                 , esc_attr( sprintf( __( 'More information about %s' ), $plugin_data['Name'] ) ), esc_attr( $plugin_data['Name'] ), __( 'View details' ) );
@@ -107,27 +106,6 @@ class PluginsRow extends AutoUpdates {
             return $result->data->status;
         }
         return FALSE;
-    }
-
-    /**
-     * Sends the request to the remote server and receives a response
-     * @access public
-     */
-    public function get_response( $action, $args ) {
-        global $wp_version;
-        $defaults = [
-            'slug' => $this->plugin_slug,
-            'version' => '1.0',
-            'path' => $this->plugin_path,
-            'product' => $this->product_id,
-            'domain' => home_url(),
-            'action' => $action,
-            'license_key' => $this->license_key ? $this->license_key : 'dummy'
-        ];
-
-        $request_args = wp_parse_args( $args, $defaults );
-        $request_string = ['body' => $request_args, 'user-agent' => 'WordPress/' . $wp_version . '; ' . home_url(), 'timeout' => 600];
-        return wp_remote_post( $this->url, $request_string );
     }
 
 }

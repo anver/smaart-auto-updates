@@ -1,5 +1,6 @@
 {
     "name": "anver/smaart-auto-updates",
+    "version": "1.0.2",
     "type": "library",
     "description": "Provides automatic updates feature for custom plugins not hosted on wordpress.org",
     "keywords": ["automatic updates", "WordPress automatic update", "WordPress licensing", "WordPress plugin upgrades", "WordPress update"],
